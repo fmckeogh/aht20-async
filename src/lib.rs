@@ -1,6 +1,8 @@
-//! A platform agnostic driver to interface with the AHT20 temperature and humidity sensor.
+//! A platform agnostic driver to interface with the AHT20 temperature and
+//! humidity sensor.
 //!
-//! This driver was built using [`embedded-hal`] traits and is a fork of Anthony Romano's [AHT10 crate].
+//! This driver was built using [`embedded-hal`] traits and is a fork of Anthony
+//! Romano's [AHT10 crate].
 //!
 //! [`embedded-hal`]: https://docs.rs/embedded-hal/~0.2
 //! [AHT10 crate]: https://github.com/heyitsanthony/aht10
@@ -11,11 +13,7 @@
 use {
     bitflags::bitflags,
     crc_all::CrcAlgo,
-    embedded_hal::blocking::{
-        delay::DelayMs,
-        i2c::{Write, WriteRead},
-    },
-    lazy_static::lazy_static,
+    embedded_hal::{delay::DelayNs, i2c::I2c},
 };
 
 const I2C_ADDRESS: u8 = 0x38;
@@ -34,18 +32,18 @@ bitflags! {
 
 /// AHT20 Error.
 #[derive(Debug, Copy, Clone)]
-pub enum Error<E> {
+pub enum Error<I2CERR> {
     /// Device is not calibrated.
     Uncalibrated,
-    /// Underlying bus error.
-    Bus(E),
     /// Checksum mismatch.
     Checksum,
+    /// Underlying I2C error.
+    I2c(I2CERR),
 }
 
 impl<E> core::convert::From<E> for Error<E> {
     fn from(e: E) -> Self {
-        Error::Bus(e)
+        Error::I2c(e)
     }
 }
 
@@ -89,17 +87,14 @@ pub struct Aht20<I2C, D> {
     delay: D,
 }
 
-impl<I2C, D, E> Aht20<I2C, D>
+impl<I2C, D> Aht20<I2C, D>
 where
-    I2C: WriteRead<Error = E> + Write<Error = E>,
-    D: DelayMs<u16>,
+    I2C: I2c,
+    D: DelayNs,
 {
     /// Creates a new AHT20 device from an I2C peripheral and a Delay.
-    pub fn new(i2c: I2C, delay: D) -> Result<Self, Error<E>> {
-        let mut dev = Self {
-            i2c: i2c,
-            delay: delay,
-        };
+    pub fn new(i2c: I2C, delay: D) -> Result<Self, Error<I2C::Error>> {
+        let mut dev = Self { i2c, delay };
 
         dev.reset()?;
 
@@ -109,15 +104,15 @@ where
     }
 
     /// Gets the sensor status.
-    fn status(&mut self) -> Result<StatusFlags, E> {
+    fn status(&mut self) -> Result<StatusFlags, I2C::Error> {
         let buf = &mut [0u8; 1];
         self.i2c.write_read(I2C_ADDRESS, &[0u8], buf)?;
 
-        Ok(StatusFlags { bits: buf[0] })
+        Ok(StatusFlags::from_bits_retain(buf[0]))
     }
 
     /// Self-calibrate the sensor.
-    pub fn calibrate(&mut self) -> Result<(), Error<E>> {
+    pub fn calibrate(&mut self) -> Result<(), Error<I2C::Error>> {
         // Send calibrate command
         self.i2c.write(I2C_ADDRESS, &[0xE1, 0x08, 0x00])?;
 
@@ -135,7 +130,7 @@ where
     }
 
     /// Soft resets the sensor.
-    pub fn reset(&mut self) -> Result<(), E> {
+    pub fn reset(&mut self) -> Result<(), I2C::Error> {
         // Send soft reset command
         self.i2c.write(I2C_ADDRESS, &[0xBA])?;
 
@@ -146,11 +141,7 @@ where
     }
 
     /// Reads humidity and temperature.
-    pub fn read(&mut self) -> Result<(Humidity, Temperature), Error<E>> {
-        lazy_static! {
-            static ref CRC: CrcAlgo<u8> = CrcAlgo::<u8>::new(49, 8, 0xFF, 0x00, false);
-        }
-
+    pub fn read(&mut self) -> Result<(Humidity, Temperature), Error<I2C::Error>> {
         // Send trigger measurement command
         self.i2c.write(I2C_ADDRESS, &[0xAC, 0x33, 0x00])?;
 
@@ -165,13 +156,14 @@ where
 
         // Check for CRC mismatch
         let crc = &mut 0u8;
-        CRC.init_crc(crc);
-        if CRC.update_crc(crc, &buf[..=5]) != buf[6] {
+        let crc_hasher = CrcAlgo::<u8>::new(49, 8, 0xFF, 0x00, false);
+        crc_hasher.init_crc(crc);
+        if crc_hasher.update_crc(crc, &buf[..=5]) != buf[6] {
             return Err(Error::Checksum);
         };
 
         // Check calibration
-        let status = StatusFlags { bits: buf[0] };
+        let status = StatusFlags::from_bits_retain(buf[0]);
         if !status.contains(StatusFlags::CALIBRATION_ENABLE) {
             return Err(Error::Uncalibrated);
         }
