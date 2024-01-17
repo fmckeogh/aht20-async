@@ -13,7 +13,7 @@
 use {
     bitflags::bitflags,
     crc_all::CrcAlgo,
-    embedded_hal::{delay::DelayNs, i2c::I2c},
+    embedded_hal_async::{delay::DelayNs, i2c::I2c},
 };
 
 const I2C_ADDRESS: u8 = 0x38;
@@ -93,36 +93,40 @@ where
     D: DelayNs,
 {
     /// Creates a new AHT20 device from an I2C peripheral and a Delay.
-    pub fn new(i2c: I2C, delay: D) -> Result<Self, Error<I2C::Error>> {
+    pub async fn new(i2c: I2C, delay: D) -> Result<Self, Error<I2C::Error>> {
         let mut dev = Self { i2c, delay };
 
-        dev.reset()?;
+        dev.reset().await?;
 
-        dev.calibrate()?;
+        dev.calibrate().await?;
 
         Ok(dev)
     }
 
     /// Gets the sensor status.
-    fn status(&mut self) -> Result<StatusFlags, I2C::Error> {
+    async fn status(&mut self) -> Result<StatusFlags, I2C::Error> {
         let buf = &mut [0u8; 1];
-        self.i2c.write_read(I2C_ADDRESS, &[0u8], buf)?;
+        self.i2c.write_read(I2C_ADDRESS, &[0u8], buf).await?;
 
         Ok(StatusFlags::from_bits_retain(buf[0]))
     }
 
     /// Self-calibrate the sensor.
-    pub fn calibrate(&mut self) -> Result<(), Error<I2C::Error>> {
+    pub async fn calibrate(&mut self) -> Result<(), Error<I2C::Error>> {
         // Send calibrate command
-        self.i2c.write(I2C_ADDRESS, &[0xE1, 0x08, 0x00])?;
+        self.i2c.write(I2C_ADDRESS, &[0xE1, 0x08, 0x00]).await?;
 
         // Wait until not busy
-        while self.status()?.contains(StatusFlags::BUSY) {
-            self.delay.delay_ms(10);
+        while self.status().await?.contains(StatusFlags::BUSY) {
+            self.delay.delay_ms(10).await;
         }
 
         // Confirm sensor is calibrated
-        if !self.status()?.contains(StatusFlags::CALIBRATION_ENABLE) {
+        if !self
+            .status()
+            .await?
+            .contains(StatusFlags::CALIBRATION_ENABLE)
+        {
             return Err(Error::Uncalibrated);
         }
 
@@ -130,29 +134,29 @@ where
     }
 
     /// Soft resets the sensor.
-    pub fn reset(&mut self) -> Result<(), I2C::Error> {
+    pub async fn reset(&mut self) -> Result<(), I2C::Error> {
         // Send soft reset command
-        self.i2c.write(I2C_ADDRESS, &[0xBA])?;
+        self.i2c.write(I2C_ADDRESS, &[0xBA]).await?;
 
         // Wait 20ms as stated in specification
-        self.delay.delay_ms(20);
+        self.delay.delay_ms(20).await;
 
         Ok(())
     }
 
     /// Reads humidity and temperature.
-    pub fn read(&mut self) -> Result<(Humidity, Temperature), Error<I2C::Error>> {
+    pub async fn read(&mut self) -> Result<(Humidity, Temperature), Error<I2C::Error>> {
         // Send trigger measurement command
-        self.i2c.write(I2C_ADDRESS, &[0xAC, 0x33, 0x00])?;
+        self.i2c.write(I2C_ADDRESS, &[0xAC, 0x33, 0x00]).await?;
 
         // Wait until not busy
-        while self.status()?.contains(StatusFlags::BUSY) {
-            self.delay.delay_ms(10);
+        while self.status().await?.contains(StatusFlags::BUSY) {
+            self.delay.delay_ms(10).await;
         }
 
         // Read in sensor data
         let buf = &mut [0u8; 7];
-        self.i2c.write_read(I2C_ADDRESS, &[0u8], buf)?;
+        self.i2c.write_read(I2C_ADDRESS, &[0u8], buf).await?;
 
         // Check for CRC mismatch
         let crc = &mut 0u8;

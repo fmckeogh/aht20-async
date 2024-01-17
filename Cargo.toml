@@ -2,18 +2,19 @@
 authors = ["Ferdia McKeogh <ferdia@mckeogh.tech>"]
 categories = ["embedded", "hardware-support", "no-std"]
 description = "A platform agnostic driver to interface with the AHT20 temperature/humidity sensors"
-documentation = "https://github.com/fmckeogh/aht20"
-keywords = ["embedded-hal-driver", "temperature", "humidity", "aht20"]
+documentation = "https://github.com/fmckeogh/aht20-async"
+keywords = ["embedded-hal-driver", "temperature", "humidity", "aht20", "async"]
 license = "AGPL-3.0-or-later"
-name = "aht20"
-repository = "https://github.com/fmckeogh/aht20"
+name = "aht20-async"
+repository = "https://github.com/fmckeogh/aht20-async"
 version = "1.0.0"
 edition = "2021"
 
 [dependencies]
-embedded-hal = "1.0.0"
+
 bitflags = "2.4.2"
 crc_all = "0.2.2"
+embedded-hal-async = "1.0.0"
 
 [dev-dependencies]
 linux-embedded-hal = "0.4.0"
